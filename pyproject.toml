@@ -20,4 +20,4 @@ build-backend = "hatchling.build"
 packages = ["src/finder_git_viz"]
 
 [project.urls]
-Homepage = "https://github.com/myrcutio/finder-git-viz"
+github = "https://github.com/myrcutio/finder-git-viz"
