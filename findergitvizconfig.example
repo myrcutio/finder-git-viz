@@ -1,0 +1,17 @@
+# Example config for finder-git-viz
+# Copy to ~/.findergitvizconfig or <repo>/.findergitvizconfig
+# Set FINDER_GIT_VIZ_CONFIG to override config path
+
+[include]
+globs = ["**"]
+
+[scan]
+# Mode: "strict" | "one_level" | "greedy" | "layout"
+# - strict:  only the watched path itself (must be a repo)
+# - one_level: path/*/.git (direct children only)
+# - greedy:   path/**/.git (all subdirectories)
+# - layout:   use path_name + repo_pattern for matching paths
+mode = "one_level"
+layouts = [
+  { path_name = "somefolder", repo_pattern = "setofsubfolders/*/*/.git" }
+]

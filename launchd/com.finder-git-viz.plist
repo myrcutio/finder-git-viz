@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.finder-git-viz</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BINARY_PATH__</string>
+    <string>--watch</string>
+    <string>~/projects</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/finder-git-viz.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/finder-git-viz.err</string>
+</dict>
+</plist>
