@@ -1,6 +1,6 @@
 [project]
 name = "finder-git-viz"
-version = "0.2.0"
+version = "0.2.1"
 description = "Finder colored tags based on git status"
 readme = "README.md"
 requires-python = ">=3.11"
