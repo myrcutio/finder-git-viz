@@ -13,65 +13,120 @@ COLOR_RED = 6
 COLOR_ORANGE = 7
 
 # (color, tag_name) for each status — single source of truth
-# Grey (not a repo) omitted — we only tag actual repos
 STATUS_MAP = {
-    "conflict": (COLOR_PURPLE, "git: conflicts / detached"),
-    "staged_unstaged": (COLOR_RED, "git: unstaged changes"),
-    "staged_only": (COLOR_ORANGE, "git: staged only"),
-    "unstaged_only": (COLOR_RED, "git: unstaged changes"),
-    "untracked_only": (COLOR_YELLOW, "git: untracked only"),
-    "behind_main": (COLOR_BLUE, "git: behind main"),
-    "up_to_date": (COLOR_GREEN, "git: up to date"),
+    "merge_conflict": (COLOR_RED, "git: merge conflict"),
+    "merge_in_progress": (COLOR_RED, "git: merge in progress"),
+    "rebase_in_progress": (COLOR_RED, "git: rebase in progress"),
+    "cherry_pick": (COLOR_RED, "git: cherry-pick in progress"),
+    "revert_in_progress": (COLOR_RED, "git: revert in progress"),
+    "diverged": (COLOR_RED, "git: diverged from default"),
+    "detached": (COLOR_RED, "git: detached HEAD"),
+    "mixed_staged_unstaged": (COLOR_RED, "git: staged and unstaged changes"),
+    "default_dirty": (COLOR_RED, "git: uncommitted on default branch"),
+    "nondefault_dirty_behind": (COLOR_RED, "git: changes while behind default"),
+    "behind_default": (COLOR_GREY, "git: behind default branch"),
+    "up_to_date_default": (COLOR_GREEN, "git: clean on default branch"),
+    "nondefault_clean_ahead": (COLOR_BLUE, "git: clean feature branch"),
+    "nondefault_behind": (COLOR_ORANGE, "git: feature branch behind default"),
+    "nondefault_staged": (COLOR_PURPLE, "git: staged on feature branch"),
+    "nondefault_unstaged": (COLOR_YELLOW, "git: unstaged on feature branch"),
 }
 
-# Priority order for resolving status (first match wins)
-STATUS_PRIORITY = ["conflict", "staged_unstaged", "staged_only", "unstaged_only", "untracked_only"]
 
-
-def _xy_to_status(xy: str) -> str | None:
-    """Map git porcelain XY pair to status key, or None if clean."""
-    if len(xy) < 2:
-        return None
-    x, y = xy[0], xy[1]
-    match xy:
-        case "UU" | "AA" | "DD" | "AU" | "UA" | "DU" | "UD":
-            return "conflict"
-        case "??":
-            return "untracked_only"
-        case _ if x not in " ?" and y not in " ?":
-            return "staged_unstaged"
-        case _ if x not in " ?":
-            return "staged_only"
-        case _ if y not in " ?":
-            return "unstaged_only"
-        case _:
-            return None
+def _aggregate_porcelain(lines: list[str]) -> tuple[bool, bool, bool, bool]:
+    """Return (has_conflict, has_staged, has_unstaged, has_untracked)."""
+    has_conflict = False
+    has_staged = False
+    has_unstaged = False
+    has_untracked = False
+    for line in lines:
+        if len(line) < 2:
+            continue
+        xy = line[:2]
+        match xy:
+            case "UU" | "AA" | "DD" | "AU" | "UA" | "DU" | "UD":
+                has_conflict = True
+            case "??":
+                has_untracked = True
+            case _:
+                x, y = xy[0], xy[1]
+                if x not in " ?":
+                    has_staged = True
+                if y not in " ?":
+                    has_unstaged = True
+    return has_conflict, has_staged, has_unstaged, has_untracked
 
 
 def git_status_to_tag(status: str, repo_path: str | None = None) -> tuple[int, str]:
     """Map porcelain output to (color, tag_name).
 
-    Priority (first match wins):
-    - Conflict / detached / rebase -> Purple
-    - Uncommitted (staged, unstaged) -> Red
-    - Staged, not committed -> Orange
-    - Untracked only -> Yellow
-    - Behind origin/main -> Blue (needs pull)
-    - Clean and up to date with main -> Green
+    Colors:
+    - Green: default branch, clean, not behind default.
+    - Grey: default branch, clean, behind default.
+    - Blue: non-default branch, clean, not behind default.
+    - Orange: non-default branch, clean, behind default.
+    - Yellow: non-default, unstaged/untracked only, not behind default.
+    - Purple: non-default, staged changes only, not behind default.
+    - Red: conflict, merge/rebase/cherry-pick/revert, diverged, detached,
+      mixed staged+unstaged, uncommitted on default, or local changes while behind.
     """
     lines = [ln.strip() for ln in status.strip().splitlines() if ln.strip()]
+    conflict, staged, unstaged, untracked = _aggregate_porcelain(lines)
+    dirty = staged or unstaged or untracked
 
-    if not lines:
-        if repo_path and git_status.is_behind_origin_main(repo_path):
-            return STATUS_MAP["behind_main"]
-        return STATUS_MAP["up_to_date"]
+    if conflict:
+        return STATUS_MAP["merge_conflict"]
 
-    statuses = {_xy_to_status(line[:2]) for line in lines if len(line) >= 2}
-    statuses.discard(None)
-    resolved = next((s for s in STATUS_PRIORITY if s in statuses), None)
+    if repo_path:
+        if git_status.repo_in_merge(repo_path):
+            return STATUS_MAP["merge_in_progress"]
+        if git_status.repo_in_rebase(repo_path):
+            return STATUS_MAP["rebase_in_progress"]
+        if git_status.repo_in_cherry_pick(repo_path):
+            return STATUS_MAP["cherry_pick"]
+        if git_status.repo_in_revert(repo_path):
+            return STATUS_MAP["revert_in_progress"]
+        if git_status.is_diverged_from_origin_default(repo_path):
+            return STATUS_MAP["diverged"]
 
-    if resolved is not None:
-        return STATUS_MAP[resolved]
-    if repo_path and git_status.is_behind_origin_main(repo_path):
-        return STATUS_MAP["behind_main"]
-    return STATUS_MAP["up_to_date"]
+        if git_status.get_current_branch_or_none(repo_path) is None:
+            return STATUS_MAP["detached"]
+
+    if staged and unstaged:
+        return STATUS_MAP["mixed_staged_unstaged"]
+
+    if repo_path and dirty:
+        on_default = git_status.is_on_default_branch(repo_path)
+        behind = git_status.is_behind_origin_main(repo_path)
+        if on_default:
+            return STATUS_MAP["default_dirty"]
+        if git_status.is_on_fixed_branch_not_default(repo_path):
+            if behind:
+                return STATUS_MAP["nondefault_dirty_behind"]
+            if staged:
+                return STATUS_MAP["nondefault_staged"]
+            if unstaged or untracked:
+                return STATUS_MAP["nondefault_unstaged"]
+        return STATUS_MAP["default_dirty"]
+
+    if not repo_path:
+        if dirty:
+            if staged and unstaged:
+                return STATUS_MAP["mixed_staged_unstaged"]
+            if staged:
+                return STATUS_MAP["nondefault_staged"]
+            if unstaged or untracked:
+                return STATUS_MAP["nondefault_unstaged"]
+        return STATUS_MAP["up_to_date_default"]
+
+    if git_status.is_on_default_branch(repo_path):
+        if git_status.is_behind_origin_main(repo_path):
+            return STATUS_MAP["behind_default"]
+        return STATUS_MAP["up_to_date_default"]
+
+    if git_status.is_on_fixed_branch_not_default(repo_path):
+        if git_status.is_behind_origin_main(repo_path):
+            return STATUS_MAP["nondefault_behind"]
+        return STATUS_MAP["nondefault_clean_ahead"]
+
+    return STATUS_MAP["detached"]
